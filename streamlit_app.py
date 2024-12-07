@@ -11,9 +11,8 @@ import numpy as np
 import matplotlib.pyplot as plt
 from PIL import Image
 import os
-import sys
 import time
-import tempfile
+import tempfile  # Убедитесь, что импортируете tempfile
 import streamlit as st
 from skimage.metrics import peak_signal_noise_ratio as psnr_metric, structural_similarity as ssim_metric
 import io
@@ -25,31 +24,48 @@ st.set_page_config(
     initial_sidebar_state="expanded",
 )
 
-# Заголовок приложения
-st.title("Лабораторная работа №3: Линейная Рекуркуляционная Сеть (Линейный автоэнкодер)")
+# Стиль для заголовков и текста
 st.markdown("""
-**Автор:** Салюков Глеб Геннадьевич  
-**Группа:** 121731  
-**Вариант:** 11  
-**Дата:** 13.11.2024  
-""")
+    <style>
+    .main-title {
+        font-size: 50px;
+        color: #4CAF50;
+        text-align: center;
+        font-weight: bold;
+        margin-bottom: 0px;
+    }
+    .info-text {
+        font-size: 20px;
+        color: #333333;
+        text-align: center;
+        margin-top: 0px;
+    }
+    .section-divider {
+        border-top: 2px solid #4CAF50;
+        margin: 20px 0;
+    }
+    </style>
+    """, unsafe_allow_html=True)
+
+# Заголовок приложения
+st.markdown('<p class="main-title">Лабораторная работа №3: Линейная Рекуркуляционная Сеть (Линейный автоэнкодер)</p>', unsafe_allow_html=True)
+
+# Информация об авторе и деталях
+col1, col2, col3, col4 = st.columns(4)
+
+with col1:
+    st.markdown('<p class="info-text"><strong>Автор:</strong> Салюков Глеб Геннадьевич</p>', unsafe_allow_html=True)
+with col2:
+    st.markdown('<p class="info-text"><strong>Группа:</strong> 121731</p>', unsafe_allow_html=True)
+with col3:
+    st.markdown('<p class="info-text"><strong>Вариант:</strong> 11</p>', unsafe_allow_html=True)
+with col4:
+    st.markdown('<p class="info-text"><strong>Дата:</strong> 13.11.2024</p>', unsafe_allow_html=True)
+
+# Горизонтальная линия
+st.markdown('<hr class="section-divider">', unsafe_allow_html=True)
 
 # Функции
-
-def convert_to_bmp(input_path, output_path):
-    """
-    Конвертирует изображение в формат BMP.
-
-    Параметры:
-    - input_path: путь к исходному изображению.
-    - output_path: путь для сохранения конвертированного BMP изображения.
-    """
-    try:
-        with Image.open(input_path) as img:
-            img.save(output_path, format='BMP')
-        st.success(f"Изображение успешно конвертировано и сохранено как {output_path}")
-    except Exception as e:
-        st.error(f"Ошибка при конвертации изображения: {e}")
 
 def convert_to_bmp_if_needed(file_bytes, filename):
     """
@@ -62,18 +78,22 @@ def convert_to_bmp_if_needed(file_bytes, filename):
     Возвращает:
     - bmp_path: путь к BMP-файлу (либо оригинальный, если он уже BMP).
     """
-    _, ext = os.path.splitext(filename)
-    if ext.lower() != '.bmp':
-        with tempfile.NamedTemporaryFile(delete=False, suffix='.bmp') as tmp_file:
-            with Image.open(io.BytesIO(file_bytes)) as img:
-                img.save(tmp_file.name, format='BMP')
-            st.info(f"Изображение конвертировано в BMP формат: {tmp_file.name}")
+    try:
+        _, ext = os.path.splitext(filename)
+        if ext.lower() != '.bmp':
+            with tempfile.NamedTemporaryFile(delete=False, suffix='.bmp') as tmp_file:
+                with Image.open(io.BytesIO(file_bytes)) as img:
+                    img.save(tmp_file.name, format='BMP')
+            st.info(f"Изображение конвертировано в BMP формат.")
             return tmp_file.name
-    else:
-        with tempfile.NamedTemporaryFile(delete=False, suffix='.bmp') as tmp_file:
-            tmp_file.write(file_bytes)
-            st.info(f"Изображение уже в BMP формате: {tmp_file.name}")
+        else:
+            with tempfile.NamedTemporaryFile(delete=False, suffix='.bmp') as tmp_file:
+                tmp_file.write(file_bytes)
+            st.info(f"Изображение уже в BMP формате.")
             return tmp_file.name
+    except Exception as e:
+        st.error(f"Ошибка при конвертации изображения: {e}")
+        st.stop()
 
 def load_image(filepath):
     """
@@ -92,7 +112,7 @@ def load_image(filepath):
         return image_array
     except Exception as e:
         st.error(f"Ошибка при загрузке изображения: {e}")
-        sys.exit(1)
+        st.stop()
 
 def split_into_patches(image, r, m, stride):
     """
@@ -126,7 +146,7 @@ def split_into_patches(image, r, m, stride):
     patches = np.array(patches)
     return patches, image_padded.shape
 
-def initialize_weights(n, p, scale=0.1):
+def initialize_weights(n, p, scale=1.0):
     """
     Инициализирует ненормированные веса с использованием стандартного нормального распределения и масштаба.
 
@@ -143,9 +163,9 @@ def initialize_weights(n, p, scale=0.1):
     Wb = np.random.randn(p, n) * scale  # Ненормированные веса с масштабом
     return Wf, Wb
 
-def train_autoencoder(X, Wf, Wb, bf, bb, alpha, epochs):
+def train_autoencoder(X, Wf, Wb, bf, bb, alpha, epochs, patience=100):
     """
-    Обучает линейный автоэнкодер без регуляризации.
+    Обучает линейный автоэнкодер без регуляризации с ранней остановкой.
 
     Параметры:
     - X: входные патчи.
@@ -155,6 +175,7 @@ def train_autoencoder(X, Wf, Wb, bf, bb, alpha, epochs):
     - bb: смещение обратного распространения.
     - alpha: скорость обучения.
     - epochs: количество эпох обучения.
+    - patience: количество эпох без улучшения перед остановкой.
 
     Возвращает:
     - Wf, Wb, bf, bb: обновлённые параметры модели.
@@ -163,6 +184,8 @@ def train_autoencoder(X, Wf, Wb, bf, bb, alpha, epochs):
     L, n = X.shape
     p = Wf.shape[1]
     errors = []
+    best_mse = float('inf')
+    no_improve_epochs = 0
 
     for epoch in range(epochs):
         # Прямое распространение
@@ -173,10 +196,22 @@ def train_autoencoder(X, Wf, Wb, bf, bb, alpha, epochs):
         mse = np.mean((X_r - X) ** 2)
         errors.append(mse)
 
+        # Проверка на улучшение
+        if mse < best_mse:
+            best_mse = mse
+            no_improve_epochs = 0
+        else:
+            no_improve_epochs += 1
+
+        # Проверка на раннюю остановку
+        if no_improve_epochs >= patience:
+            st.warning(f"Ранняя остановка: ошибка не улучшалась в течение {patience} эпох.")
+            break
+
         # Проверка на NaN
         if np.isnan(mse):
             st.error(f"Эпоха {epoch + 1}: Ошибка стала NaN. Остановка обучения.")
-            break
+            st.stop()
 
         # Обратное распространение ошибок
         dX_r = (X_r - X) / L  # Градиент по декодированному выходу
@@ -274,6 +309,32 @@ def save_reconstructed_image(reconstructed_image):
     img_bytes.seek(0)
     return img_bytes
 
+def save_weights(Wf, Wb, bf, bb):
+    """
+    Сохраняет матрицы весов и смещений в BytesIO.
+
+    Параметры:
+    - Wf: матрица весов прямого распространения.
+    - Wb: матрица весов обратного распространения.
+    - bf: смещение прямого распространения.
+    - bb: смещение обратного распространения.
+
+    Возвращает:
+    - Wf_bytes, Wb_bytes, bf_bytes, bb_bytes: объекты BytesIO с весовыми матрицами и смещениями.
+    """
+    def save_numpy_array(array):
+        bytes_io = io.BytesIO()
+        np.save(bytes_io, array)
+        bytes_io.seek(0)
+        return bytes_io
+
+    Wf_bytes = save_numpy_array(Wf)
+    Wb_bytes = save_numpy_array(Wb)
+    bf_bytes = save_numpy_array(bf)
+    bb_bytes = save_numpy_array(bb)
+
+    return Wf_bytes, Wb_bytes, bf_bytes, bb_bytes
+
 def visualize_results(original, reconstructed, errors, mse, psnr, ssim, r, m, stride, X, X_r, num_patches=5):
     """
     Визуализирует оригинальное и восстановленное изображение, график ошибки и несколько патчей с дополнительной информацией.
@@ -307,7 +368,7 @@ def visualize_results(original, reconstructed, errors, mse, psnr, ssim, r, m, st
 
         with col3:
             difference = np.abs(original - reconstructed)
-            st.image((difference + 1.0) / 2.0, caption="Разница (Оригинал - Восстановление)", use_column_width=True)
+            st.image(difference / 2.0, caption="Разница (Оригинал - Восстановление)", use_column_width=True)
 
         with col4:
             st.markdown(f"""
@@ -355,7 +416,7 @@ def visualize_results(original, reconstructed, errors, mse, psnr, ssim, r, m, st
             axes[1].axis('off')
 
             # Разница патчей
-            axes[2].imshow((patch_difference + 1.0) / 2.0)
+            axes[2].imshow(patch_difference / 2.0)
             axes[2].set_title('Разница патчей')
             axes[2].axis('off')
 
@@ -363,33 +424,6 @@ def visualize_results(original, reconstructed, errors, mse, psnr, ssim, r, m, st
             patch_mse = np.mean((original_patch - reconstructed_patch) ** 2)
             fig.suptitle(f'Патч №{idx + 1}: MSE = {patch_mse:.6f}', fontsize=14)
             st.pyplot(fig)
-
-def save_weights(Wf, Wb, bf, bb):
-    """
-    Сохраняет матрицы весов и смещений в файлы и возвращает их как BytesIO.
-
-    Параметры:
-    - Wf: матрица весов прямого распространения.
-    - Wb: матрица весов обратного распространения.
-    - bf: смещение прямого распространения.
-    - bb: смещение обратного распространения.
-
-    Возвращает:
-    - Wf_bytes, Wb_bytes, bf_bytes, bb_bytes: объекты BytesIO с весовыми матрицами и смещениями.
-    """
-    # Функция сохраняет numpy массивы в BytesIO
-    def save_numpy_array(array):
-        bytes_io = io.BytesIO()
-        np.save(bytes_io, array)
-        bytes_io.seek(0)
-        return bytes_io
-
-    Wf_bytes = save_numpy_array(Wf)
-    Wb_bytes = save_numpy_array(Wb)
-    bf_bytes = save_numpy_array(bf)
-    bb_bytes = save_numpy_array(bb)
-
-    return Wf_bytes, Wb_bytes, bf_bytes, bb_bytes
 
 # Главная функция Streamlit приложения
 def main():
@@ -414,7 +448,7 @@ def main():
         st.sidebar.subheader("Параметры Обучения")
         alpha = st.sidebar.number_input("Скорость обучения (alpha)", min_value=0.00001, max_value=1.0, value=0.0001, step=0.00001, format="%.5f")
         epochs = st.sidebar.number_input("Количество эпох", min_value=1, max_value=100000, value=3000, step=100)
-        # Регуляризация не используется в соответствии с ТЗ, поэтому не добавляем ее
+        patience = st.sidebar.number_input("Параметр ранней остановки (patience)", min_value=10, max_value=1000, value=100, step=10)
 
         if st.sidebar.button("Начать Обучение"):
             with st.spinner("Обучение модели... Это может занять некоторое время..."):
@@ -425,7 +459,7 @@ def main():
                 # Проверка параметров патча
                 if not (4 <= r <= h and 4 <= m <= w):
                     st.error(f"Параметры патча некорректны: 4 <= r <= {h}, 4 <= m <= {w}")
-                    return
+                    st.stop()
 
                 # Разбиение на патчи
                 X, padded_shape = split_into_patches(image, r, m, stride)
@@ -433,19 +467,24 @@ def main():
 
                 # Инициализация весов и смещений
                 n = X.shape[1]
-                p = n // 2 + 50  # Размер скрытого слоя, можно настроить
+                p = max(1, n // 2 + 50)  # Размер скрытого слоя, можно настроить
                 Wf, Wb = initialize_weights(n, p, scale=0.1)  # Уменьшение масштаба до 0.1
                 bf = np.zeros((1, p))
                 bb = np.zeros((1, n))
 
-                st.write(f"Инициализированы веса: Wf.shape = {Wf.shape}, Wb.shape = {Wb.shape}")
-                st.write(f"Параметры обучения: alpha = {alpha}, epochs = {epochs}")
+                st.write(f"**Инициализированы веса:**")
+                st.write(f"- **Wf.shape:** {Wf.shape}")
+                st.write(f"- **Wb.shape:** {Wb.shape}")
+                st.write(f"**Параметры обучения:**")
+                st.write(f"- **alpha:** {alpha}")
+                st.write(f"- **epochs:** {epochs}")
+                st.write(f"- **patience:** {patience}")
 
                 # Засекаем время начала обучения
                 start_time = time.time()
 
                 # Обучение автоэнкодера
-                Wf, Wb, bf, bb, errors = train_autoencoder(X, Wf, Wb, bf, bb, alpha, epochs)
+                Wf, Wb, bf, bb, errors = train_autoencoder(X, Wf, Wb, bf, bb, alpha, epochs, patience)
 
                 # Засекаем время завершения обучения
                 end_time = time.time()
@@ -519,6 +558,8 @@ def main():
                 st.write(f"- **Среднеквадратичная ошибка (MSE):** {mse:.6f}")
                 st.write(f"- **Пиковое отношение сигнал/шум (PSNR):** {psnr:.2f} dB")
                 st.write(f"- **Структурное сходство (SSIM):** {ssim_val:.4f}")
+    else:
+        st.info("Пожалуйста, загрузите изображение для начала работы.")
 
-    if __name__ == "__main__":
-        main()
+if __name__ == "__main__":
+    main()
