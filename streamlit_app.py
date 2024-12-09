@@ -12,14 +12,18 @@ import matplotlib.pyplot as plt
 from PIL import Image
 import os
 import time
-import tempfile  # Убедитесь, что импортируете tempfile
+import tempfile
+import pandas as pd
 import streamlit as st
 from skimage.metrics import peak_signal_noise_ratio as psnr_metric, structural_similarity as ssim_metric
 import io
 
+# Установка случайного seed для воспроизводимости
+np.random.seed(42)
+
 # Настройки страницы Streamlit
 st.set_page_config(
-    page_title="Линейная Рекуркуляционная Сеть (Линейный автоэнкодер)",
+    page_title="Реализация модели линейной рекуркуляционной сети с постоянным коэффициентом обучения и ненормированными весами.",
     layout="wide",
     initial_sidebar_state="expanded",
 )
@@ -48,7 +52,7 @@ st.markdown("""
     """, unsafe_allow_html=True)
 
 # Заголовок приложения
-st.markdown('<p class="main-title">Лабораторная работа №3: Линейная Рекуркуляционная Сеть (Линейный автоэнкодер)</p>', unsafe_allow_html=True)
+st.markdown('<p class="main-title">Лабораторная работа №3: требуется реализовать модель линейной рекуркуляционной сети с постоянным коэффициентом обучения и ненормированными весами.</p>', unsafe_allow_html=True)
 
 # Информация об авторе и деталях
 col1, col2, col3, col4 = st.columns(4)
@@ -84,12 +88,12 @@ def convert_to_bmp_if_needed(file_bytes, filename):
             with tempfile.NamedTemporaryFile(delete=False, suffix='.bmp') as tmp_file:
                 with Image.open(io.BytesIO(file_bytes)) as img:
                     img.save(tmp_file.name, format='BMP')
-            st.info(f"Изображение конвертировано в BMP формат.")
+            st.info("Изображение конвертировано в BMP формат.")
             return tmp_file.name
         else:
             with tempfile.NamedTemporaryFile(delete=False, suffix='.bmp') as tmp_file:
                 tmp_file.write(file_bytes)
-            st.info(f"Изображение уже в BMP формате.")
+            st.info("Изображение уже в BMP формате.")
             return tmp_file.name
     except Exception as e:
         st.error(f"Ошибка при конвертации изображения: {e}")
@@ -146,7 +150,7 @@ def split_into_patches(image, r, m, stride):
     patches = np.array(patches)
     return patches, image_padded.shape
 
-def initialize_weights(n, p, scale=1.0):
+def initialize_weights(n, p, scale=0.1):
     """
     Инициализирует ненормированные веса с использованием стандартного нормального распределения и масштаба.
 
@@ -227,6 +231,11 @@ def train_autoencoder(X, Wf, Wb, bf, bb, alpha, epochs, patience=100):
         Wb -= alpha * dWb
         bf -= alpha * dbf
         bb -= alpha * dbb
+
+        # Дополнительная проверка на стабильность весов
+        if np.any(np.abs(Wf) > 1e5) or np.any(np.abs(Wb) > 1e5):
+            st.error("Весовые коэффициенты стали слишком большими. Остановка обучения.")
+            st.stop()
 
         # Вывод информации каждые 100 эпох
         if (epoch + 1) % 100 == 0 or epoch == 0:
@@ -380,19 +389,25 @@ def visualize_results(original, reconstructed, errors, mse, psnr, ssim, r, m, st
 
     with tab2:
         st.subheader("График Изменения Ошибки по Эпохам")
-        fig, ax = plt.subplots(figsize=(10, 5))
-        ax.plot(range(1, len(errors) + 1), errors, color='blue', label='MSE', linewidth=2)
-        ax.set_xlabel('Эпоха обучения')
-        ax.set_ylabel('Среднеквадратичная ошибка (MSE)')
-        ax.set_title('График изменения ошибки по эпохам')
-        ax.legend()
-        ax.grid(True, linestyle='--', linewidth=0.5)
-        # Добавление вертикальных линий для ключевых эпох
-        key_epochs = [1, len(errors) // 4, len(errors) // 2, 3 * len(errors) // 4, len(errors)]
-        for epoch in key_epochs:
-            ax.axvline(x=epoch, color='red', linestyle='--', linewidth=1)
-            ax.text(epoch, ax.get_ylim()[1]*0.95, f'Epoch {epoch}', rotation=90, color='red', fontsize=8, ha='right')
-        st.pyplot(fig)
+
+
+
+        # Пример данных (замените `errors` вашими данными)
+        epochs = list(range(1, len(errors) + 1))
+        key_epochs = list(range(100, len(errors) + 1, 100))  # Ключевые эпохи каждые 100
+        data = pd.DataFrame({
+            "Эпоха": epochs,
+            "Ошибка (MSE)": errors
+        })
+
+        # Подсветим ключевые эпохи отдельным цветом, если потребуется
+        data['Ключевые эпохи'] = ["Ключевая" if epoch in key_epochs else "Обычная" for epoch in epochs]
+
+        # Визуализация с помощью Streamlit
+        st.bar_chart(data, x="Эпоха", y="Ошибка (MSE)",
+                     x_label="Эпоха обучения",
+                     y_label="Среднеквадратичная ошибка (MSE)",
+                     use_container_width=True)
 
     with tab3:
         st.subheader("Примеры Патчей")
@@ -446,9 +461,28 @@ def main():
         stride = st.sidebar.number_input("Шаг (stride)", min_value=1, value=4, step=1)
 
         st.sidebar.subheader("Параметры Обучения")
-        alpha = st.sidebar.number_input("Скорость обучения (alpha)", min_value=0.00001, max_value=1.0, value=0.0001, step=0.00001, format="%.5f")
-        epochs = st.sidebar.number_input("Количество эпох", min_value=1, max_value=100000, value=3000, step=100)
-        patience = st.sidebar.number_input("Параметр ранней остановки (patience)", min_value=10, max_value=1000, value=100, step=10)
+        alpha = st.sidebar.number_input(
+            "Скорость обучения (alpha)",
+            min_value=0.00001,
+            max_value=1.0,
+            value=0.0001,
+            step=0.00001,
+            format="%.5f"
+        )
+        epochs = st.sidebar.number_input(
+            "Количество эпох",
+            min_value=1,
+            max_value=100000,
+            value=3000,
+            step=100
+        )
+        patience = st.sidebar.number_input(
+            "Параметр ранней остановки (patience)",
+            min_value=10,
+            max_value=1000,
+            value=100,
+            step=10
+        )
 
         if st.sidebar.button("Начать Обучение"):
             with st.spinner("Обучение модели... Это может занять некоторое время..."):
@@ -468,13 +502,14 @@ def main():
                 # Инициализация весов и смещений
                 n = X.shape[1]
                 p = max(1, n // 2 + 50)  # Размер скрытого слоя, можно настроить
-                Wf, Wb = initialize_weights(n, p, scale=0.1)  # Уменьшение масштаба до 0.1
+                Wf, Wb = initialize_weights(n, p, scale=0.1)  # Масштаб изменён на 0.1 для стабильности
                 bf = np.zeros((1, p))
                 bb = np.zeros((1, n))
 
                 st.write(f"**Инициализированы веса:**")
                 st.write(f"- **Wf.shape:** {Wf.shape}")
                 st.write(f"- **Wb.shape:** {Wb.shape}")
+                st.write(f"- **X.shape:** {X.shape}")
                 st.write(f"**Параметры обучения:**")
                 st.write(f"- **alpha:** {alpha}")
                 st.write(f"- **epochs:** {epochs}")
